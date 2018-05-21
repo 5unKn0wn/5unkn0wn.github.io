@@ -381,7 +381,7 @@ han: false
 #duoshuo_shortname:
 
 # Disqus
-disqus:
+disqus: #################################################################################?
   enable: false
   shortname:
   count: true
