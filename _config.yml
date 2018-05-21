@@ -14,7 +14,7 @@ date_format: '%Y-%m-%d'
 
 # URL
 ## If your site is put in a subdirectory, set url as 'http://yoursite.com' and baseurl as '/child'
-url:
+url:"https://5unKn0wn.github.io"
 baseurl:
 permalink: pretty
 
@@ -709,3 +709,5 @@ images: assets/images
 
 # Theme version
 version: 5.1.1
+
+remote_theme : Simpleyyt/jekyll-theme-next
