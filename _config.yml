@@ -5,8 +5,10 @@
 
 # Site
 title: 5unKn0wn's Blog
-subtitle: ctf write-up, technology, study, etc...
-description:
+subtitle: ctf write-up, technology, study, ...
+description: Hello, I am 5unKn0wn
+email: 5unKn0wn.lee@gmail.com
+github_username: 5unKn0wn
 author: 5unKn0wn
 # Support language: de, en, fr-FR, id, ja, ko, pt-BR, pt, ru, zh-Hans, zh-hk, zh-tw
 language: en, ko
@@ -14,7 +16,7 @@ date_format: '%Y-%m-%d'
 
 # URL
 ## If your site is put in a subdirectory, set url as 'http://yoursite.com' and baseurl as '/child'
-url:
+url: "https://blog2.5unKn0wn.kr"
 baseurl:
 permalink: pretty
 
