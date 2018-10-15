@@ -1,9 +1,8 @@
 ---
 layout: post
 title: New blog start
-categories:
- - Notice
 tags: Notice
+comments: true
 ---
 
 # 새 블로그 시작

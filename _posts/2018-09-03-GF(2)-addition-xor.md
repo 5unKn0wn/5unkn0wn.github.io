@@ -1,8 +1,6 @@
 ---
 layout: post
-title: GF(2)에서의 덧셈과 뺄셈
-categories:
- - Math
+title: Addition and Subtraction over GF(2)
 tags: Math, Crypto
 ---
 

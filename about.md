@@ -4,12 +4,12 @@ title: About
 permalink: /about/
 ---
 
-Some information about you!
+Name : 이태양
 
 ### More Information
 
-A place to include any other types of information that you'd like to include about yourself.
+해커입니다.
 
 ### Contact me
 
-[email@domain.com](mailto:email@domain.com)
+[5unkn0wn.lee@gmail.com](mailto:5unkn0wn.lee@gmail.com)
