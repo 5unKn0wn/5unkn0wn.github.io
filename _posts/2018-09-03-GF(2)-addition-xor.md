@@ -4,7 +4,8 @@ title: Addition and Subtraction over GF(2)
 tags: Math, Crypto
 ---
 
-# GF(2)에서의 뺄셈이 덧셈과 같은 이유
+GF(2)에서의 뺄셈이 덧셈과 같은 이유를 알아보자.
+
 GF(2)에서는 모듈로가 2이기 때문에 원소가 0, 1밖에 없다. (기약다항식이 x임)  
 따라서 덧셈은
 
