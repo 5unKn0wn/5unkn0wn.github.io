@@ -1,7 +1,7 @@
 ---
 layout: post
 title: Addition and Subtraction over GF(2)
-tags: Math, Crypto
+tags: Crypto
 ---
 
 GF(2)에서의 뺄셈이 덧셈과 같은 이유를 알아보자.
