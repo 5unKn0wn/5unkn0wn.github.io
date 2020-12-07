@@ -179,7 +179,7 @@ And calling bitstream again, but callback is not function `mod`. This callback j
 
 And not in the decompiled code, but if you look at the code in disassembled code, it checks if the first 8 bytes are `0x6D73415F333C5F49`.
 
-It means our first 8 bytes must be `0x6D73415F333C5F49 ^ 0x320471336C4B6F01 == 5F77306F5F773048 ("H0w_l0w_")`.
+It means our first 8 bytes must be `0x6D73415F333C5F49 ^ 0x320471336C4B6F01 == 0x5F77306F5F773048 ("H0w_l0w_")`.
 
 I think it was fake that first function checked if it started with `pbctf{mod`.
 
