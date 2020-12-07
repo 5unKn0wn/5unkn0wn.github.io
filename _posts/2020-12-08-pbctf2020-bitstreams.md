@@ -42,7 +42,7 @@ And next, it calls `0x40439F` via `sub_401001`. After some tracing, I noticed th
 For binaries with a lot of branches like this one, dynamic analysis is more helpful.
 
 # Dynamic analysis
-After some debugging, I found out this binary append write permission to code section via mprotect. So obviously this binary will do self modifying. 
+After some debugging, I found out this binary appends write permission to code section via mprotect. So obviously this binary will do self modifying. 
 
 With a little more debugging, it'll run `bitstream` function which seems important.
 
