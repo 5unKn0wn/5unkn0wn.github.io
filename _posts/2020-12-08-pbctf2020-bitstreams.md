@@ -37,7 +37,7 @@ Let's disassemble.
 
 It assigns 0x33 at fs segment selector. 0x33 is the value of cs segment selector so it means this binary can access code segment via fs segment selector. Maybe it will be apear again later.
 
-And next, it calls `0x40439F` via `sub_401001`. After some tracing, I noticed that this binary has really many branches like `jmp rax`.
+And next, it calls `0x40439F` via `sub_401001`. After some tracing, I noticed that this binary has a lot of branches like `jmp rax`.
 
 For binaries with a lot of branches like this one, dynamic analysis is more helpful.
 
@@ -60,13 +60,13 @@ For example, in simple, it looks like this.
 
 ```nasm
 call $+5
-pop r12           ; r12 has current code address
+pop r12
 loop:
 mov al, 4
 test al, al
 jz loop_end
-call do_something ; what to do in loop
-dec byte ptr cs:[r12+0xf]     ; r12+0xf points second operand of `mov al, 4`, so when this instruction executed, `mov al, 4` instruction changes to `mov al, 3`.
+call do_something
+dec byte ptr cs:[r12+0xf]
 jmp loop
 loop_end:
 ret
@@ -99,9 +99,9 @@ Okay, so this is what `mod` function and does.
 1. collect 4 bit from bitstream.
 2. set collected 4 bit value (0~15) as loop count
 3. in while loop:
-3-1. read 1 bit
-3-2. if bit is 0, do shl 1 for the given specific address.
-3-3. if bit is 1, do add 1 for the given specific address.
+3-1. read 1 bit  
+3-2. if bit is 0, do shl 1 for the given specific address.  
+3-3. if bit is 1, do add 1 for the given specific address.  
 4. increase 1 given specific address.
 5. if bitstream ends, return.
 
