@@ -110,7 +110,7 @@ Going back to the point of debugging, the `mod` function finally does rewriting 
 # Analyzing new code
 ![newcode1](/images/pbctf2020-bitstreams/newcode1.png)
 
-Newly written code is more clear. When I tried to do decompile, `positive sp value has been found` error was occured. But fixing SP value at 0x401102 to -0x8 can fix it.
+Newly written code is more clear. When I tried to do decompile, `positive sp value has been found` error was occured. But fixing SP value at `0x401102` to `-0x8` can fix it.
 
 ![newdeccode1](/images/pbctf2020-bitstreams/newdeccode1.png)
 
@@ -131,12 +131,12 @@ If this condition all satisfied, the binary does rewriting code section again.
 The next function checks again about input.
 
 1. find the last underbar (`_`) at the end.
-2. decode the string to hex after _. (e.g. "4142" -> "AB")
+2. decode the string to hex after `_`. (e.g. `4142` -> `AB`)
 3. call `bitstream` function with arguments as decoded value and `mod` function.
-4. compare `bitstream` function result with ":3 awesome".
+4. compare `bitstream` function result with `:3 awesome`.
 5. if same, rewriting again.
 
-Okay, our input after `_` is in the form of a hex and the result of `mod` function should be ":3 awesome".
+Okay, our input after `_` is in the form of a hex and the result of `mod` function should be `:3 awesome`.
 
 We already analyzed the `mod` function, so let's write the code.
 
@@ -181,7 +181,7 @@ And not in the decompiled code, but if you look at the code in disassembled code
 
 It means our first 8 bytes must be `0x6D73415F333C5F49 ^ 0x320471336C4B6F01 == 5F77306F5F773048 ("H0w_l0w_")`.
 
-I think it was fake that first function checked if it started with "pbctf{mod".
+I think it was fake that first function checked if it started with `pbctf{mod`.
 
 Okay, only the last one is left.
 
@@ -198,7 +198,7 @@ Matrix is `getData` function's output and vector is our input which added as ind
 After that, binary calls main function. So the value compared from main is output of matrix multiplication.
 
 # Decrypt the flag
-We have original matrix so we can recovery original vector using inverse matrix.
+We have original matrix so we can recovery original vector.
 
 Ask to sage what the original was.
 
