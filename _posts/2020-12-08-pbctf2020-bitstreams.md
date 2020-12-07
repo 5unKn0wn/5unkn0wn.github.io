@@ -98,7 +98,7 @@ Okay, so this is what `mod` function and does.
 
 1. collect 4 bit from bitstream.
 2. set collected 4 bit value (0~15) as loop count
-3. in while loop:
+3. in while loop:  
 3-1. read 1 bit  
 3-2. if bit is 0, do shl 1 for the given specific address.  
 3-3. if bit is 1, do add 1 for the given specific address.  
