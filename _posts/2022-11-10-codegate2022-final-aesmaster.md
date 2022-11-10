@@ -279,7 +279,7 @@ print(1 ^ 2 == 3)
 
 True가 나오는 것을 확인할 수 있다.
 
-즉, 이 문제는 선형적인 AES가 주어졌을 때 $\text{LinearAES}(k, p) = p$를 만족하는 $k$를 구하는 문제로 바뀐다.
+즉, 이 문제는 선형적인 AES 함수 $\text{LinearAES}$와 평문 $p$가 주어졌을 때 $\text{LinearAES}(k, p) = p$를 만족하는 $k$를 구하는 문제로 바뀐다.
 
 # Breaking LinearAES
 
