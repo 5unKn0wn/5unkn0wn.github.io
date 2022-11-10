@@ -4,9 +4,11 @@ title: Codegate 2022 Final - AESMaster (Reversing)
 tags: CTF
 ---
 
+This is write up for codegate 2022 final - AESMaster (reversing). Sorry for korean only.
+
 # TL;DR
 
-- 문제의 목적은 $AES(k, p) = p$ 인 $k$를 찾는 일종의 AES fixed point 문제
+- 문제의 목적은 $AES(k, p) = p$ 에서 $p$가 주어졌을 때, $k$를 찾는 일종의 AES fixed point 문제
 - UPX 언패커를 통해 언패킹 했을 때와 실제 실행 압축이 풀릴 때 AES의 sbox가 달라짐
 - 달라진 sbox는 선형적이기 때문에 AES 전체 과정을 하나의 선형 함수로 볼 수 있음
 - 따라서 연립방정식을 세워 fixed point 문제 해결
@@ -97,8 +99,7 @@ sbox = (
 합리적인 의심으로.. sbox를 취약하게 변형한다면, 제일 유력한 방법은 sbox 자체를 선형적으로 만들 것 같다는 생각을 하였다. 선형 함수의 특징은 다음 두 특징이 있는데,
 
 $#
-f(x + y) = f(x) + f(y)\\
-af(x) = f(ax)
+f(x + y) = f(x) + f(y)\\\\af(x) = f(ax)
 $#
 
 이 중 첫 번째 특성을 이용하여 이를 확인하였다.
