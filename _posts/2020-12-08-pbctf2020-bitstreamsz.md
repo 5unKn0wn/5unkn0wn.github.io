@@ -1,233 +1,391 @@
 ---
 layout: post
-title: pbctf2020 Hyper Bitstreams Iz write-up
+title: Codegate 2022 Final - AESMaster (Reversing)
 tags: CTF
 ---
 
-This challenge gives statically compiled x64 ELF binary which implements dynamic linking by itself. And there are a lot of anti reversing like self modifying, code obfuscation.
+# Reversing - AESMaster
 
-![description](/images/pbctf2020-bitstreams/description.png)
+# TL;DR
 
-# Heading to binary
-This binary does not strip symbol information.
+- 문제의 목적은 $AES(k, p) = p$ 인 $k$를 찾는 일종의 AES fixed point 문제
+- UPX 언패커를 통해 언패킹 했을 때와 실제 실행 압축이 풀릴 때 AES의 sbox가 달라짐
+- 달라진 sbox는 선형적이기 때문에 AES 전체 과정을 하나의 선형 함수로 볼 수 있음
+- 따라서 연립방정식을 세워 fixed point 문제 해결
 
-![symbol](/images/pbctf2020-bitstreams/symbol.png)
+# Intrduction
 
-There are functions for resolving dynamic symbol like `_dl_resolve`, `dl_find`, `_dynlink`. From this, we can assume that this binary implements dynamic linking by itself.
+AESMaster 바이너리는 UPX로 패킹된 32비트 PE 형태의 바이너리이다. UPX 언패커를 다운로드 받아 패킹을 해제한 뒤, 바이너리를 분석해보면 바이너리가 수행하는 행위 자체는 간단하다.
 
-And the main function is too simple.
+이용자에게 32바이트 hex 인코딩된 인풋을 입력받고, 이를 디코딩하여 AES의 키로 사용한다. 이후, `codegate2022{xx}` 라는 값을 암호화한 값이 `codegate2022{xx}` 그대로 나온다면 입력한 키를 플래그로 출력해준다.
 
-![main](/images/pbctf2020-bitstreams/main.png)
+바이너리 자체에는 아무런 난독화가 적용되어있지 않기 때문에 분석 자체는 간단한 편이다. AES의 동작 구조를 이해하고 있다면 암호화 함수가 수행하는 동작을 분석하여 AES임을 인지하고, 이후부터는 바이너리 분석을 통해 얻어낼 수 있는 정보는 크게 없다.
 
-It just compares `argv[1]` with encoded flag. So I thought there are hidden routine at constructor. But this challenge was not compiled using common compiler like gcc, clang, so I analyzed `_start` routine.
+이제 문제를 풀기 위해서는 어떤 키를 입력으로 넣어야 AES 함수의 입력과 출력이 같은 값이 나오는지를 찾아야 한다. 참고로 어떤 함수 $f$가 존재할 때, $f(x) = x$ 와 같이 입력과 출력이 같아지는 점 $x$를 [fixed point](https://ko.wikipedia.org/wiki/%EA%B3%A0%EC%A0%95%EC%A0%90) (고정점) 라고 한다.
 
-![start](/images/pbctf2020-bitstreams/start.png)
+# Find backdoor’ed S-BOX
 
-Most of code's are not disassembled and IDA does not create `_start` as function. It means this binary was obfuscated.
+일반적으로 AES의 입력과 출력이 같게 만들어주는 키는 존재하지 않는다. (혹은 아직 발견되지 않았다.)
 
-As you can see, `_start` calls only `sub_401001` function and exits. But `sub_401001` function has only `jmp rax`.
+이처럼 아직 발견되지 않았거나 불가능하다고 느껴지는 행위를 리버싱 문제에서 요구한다면, 이는 바이너리 상에서 구현한 알고리즘이 원본 알고리즘과 다르거나, 특수한 상황에서만 발현되는 백도어 형태의 코드가 존재해 해당 상황에서만 바이너리가 요구하는 조건을 만족할 수 있을 확률이 높다.
 
-![obf](/images/pbctf2020-bitstreams/obf.png)
+비슷한 형태의 문제로 2020년 hxpctf에 출제되었던 md15 문제를 예로들 수 있다.
 
-So calling `sub_401001` is same with calling `rax`. `_start` assigns `byte_404387` to `rax` and it means `byte_404387` is executable instructions.
+md5 해시를 이용하여 여러 개의 아웃풋이 있고, 아웃풋의 입력 간 차분 (difference)이 주어졌을 때 입력 값을 구해야하는 컨셉의 문제이다. 물론, 이 역시 알려진 해결법이 없는 문제이다.
 
-Let's disassemble.
+이 문제 또한 elf 바이너리에서 `__libc_csu_init` 함수가 변조되어 백도어가 존재하는 형태의 문제였으며, 실제로는 md5 해시의 전체 라운드 수가 1/4로 줄어들었을 때 평문을 복구하는 형태의 문제였다.
 
-![obf2](/images/pbctf2020-bitstreams/obf2.png)
+자세한 라이트업은 pasten 팀의 [라이트업](https://github.com/oranav/ctf-writeups/tree/master/36c3/md15)을 참고.
 
-It assigns 0x33 at fs segment selector. 0x33 is the value of cs segment selector so it means this binary can access code segment via fs segment selector. Maybe it will be apear again later.
+따라서 AESMaster 문제도 AES 로직이 변경되었거나, 백도어가 있다고 판단하였다.
 
-And next, it calls `0x40439F` via `sub_401001`. After some tracing, I noticed that this binary has a lot of branches like `jmp rax`.
+먼저 upx가 언패킹된 바이너리에서 직접 AES 함수를 실행해보면 원본 AES 함수와 똑같이 동작하기 때문에 AES 로직이 변경되지는 않았다고 판단하였다. 그렇다면 바이너리 내 어딘가에 백도어가 있다고 판단할 수 있는데, 언패킹된 바이너리 내에 별도의 백도어 코드는 볼 수 없었다.
 
-For binaries with a lot of branches like this one, dynamic analysis is more helpful.
+이 때부터 upx를 의심하기 시작했고, upx로 패킹되어있는 원본 바이너리를 직접 디버깅해서 AES 함수를 실행해보니 원본 암호화와 다른 방식으로 동작하는 것을 확인하였다.
 
-# Dynamic analysis
-After some debugging, I found out this binary appends write permission to code section via mprotect. So obviously this binary will do self modifying. 
+![언패커로 언패킹하지 않고 실행 압축으로 해제했을 때 암호문 (input = “0” * 32)](/images/codegate2022-final-aesmaster/Screen_Shot_2022-11-10_at_10.40.46_PM.png)
 
-With a little more debugging, it'll run `bitstream` function which seems important.
+언패커로 언패킹하지 않고 실행 압축으로 해제했을 때 암호문 (input = “0” * 32)
 
-![bitstream](/images/pbctf2020-bitstreams/bitstream.png)
+![언패커로 언패킹했을 때 암호문 (input = “0” * 32)](/images/codegate2022-final-aesmaster/Screen_Shot_2022-11-10_at_10.39.59_PM.png)
 
-This function does simply call callback function with argument as bit of first argument. Calling callback runs in while loop until callback returns 0. And at this time, the callback was passed to function `mod`.
+언패커로 언패킹했을 때 암호문 (input = “0” * 32)
 
-![mod](/images/pbctf2020-bitstreams/mod.png)
+이후 바이너리를 분석해보니 AES 암호화에 사용되는 테이블 중 S-BOX가 변경되어있음을 확인하였다.
 
-There are a lot of calling `sub_401001`, and switch cases. I just traced this function and finally catched what the function does.
+![변조된 S-BOX](/images/codegate2022-final-aesmaster/Untitled.png)
 
-First, this function uses instruction operand as variable like loop count, sum, switch case number. 
+변조된 S-BOX
 
-For example, in simple, it looks like this.
+![원본 S-BOX](/images/codegate2022-final-aesmaster/Untitled%201.png)
 
-```nasm
-call $+5
-pop r12
-loop:
-mov al, 4
-test al, al
-jz loop_end
-call do_something
-dec byte ptr cs:[r12+0xf]
-jmp loop
-loop_end:
-ret
-```
+원본 S-BOX
 
-When `pop r12` executed, r12 has current code address because `call $+5` means calling following instruction. 
+따라서 이 문제는 원본 AES에서 S-BOX가 다른 값으로 변경되었을 때 AES를 공격하는 문제로 볼 수 있게 된다.
 
-And the main point is `dec byte ptr cs:[r12+0xf]`. `r12+0xf` points second operand of `mov al, 4`. So when this instruction executed, `mov al, 4` instruction changes to `mov al, 3`.
+# Vulnerable S-BOX
 
-So that loop runs 4 times. Really interesting technique.
+AES의 S-BOX가 변조되었을 때의 취약성을 이해하려면 먼저 AES 암호화에서 S-BOX가 어떤 역할을 지니는지 이해하는 것이 중요하다. AES 암호화의 내부 구조에 대해서 잘 알지 못한다면, [드림핵 강의](https://dreamhack.io/lecture/courses/73)를 먼저 이해하길 추천한다.
 
-Second, this function has instruction polyglot.
+AES 암호화의 기본 구조는 SPN (Substitute-Permutation-Network)의 형태를 띈다. 즉 치환와 순열의 구조를 갖는 암호라는 의미인데, AES 내부 구조에서 sub bytes 과정이 치환을, shift rows와 mix columns 과정이 순열의 역할을 한다. **AES에서 치환이 중요한 이유는 선형적인 암호화 과정을 비선형적으로 만들어준다는 점이다.** 
 
-Let see below two pictures. This instructions are the difference between when branch was taken or not.
+shift rows와 mix columns 과정은 선형적인 연산이기 때문에 치환 과정이 없다면 행렬이나 기타 선형적인 연산으로 변형하여 암호문을 복구하거나 키를 복구하는 형태의 공격이 가능해진다. 따라서 매 라운드마다 비선형적인 연산인 치환을 수행하여 선형적인 연산으로 암호를 공격하지 못하도록 하는데에 목적이 있다. 
 
-When branch was taken.
+S-BOX는 sub bytes에서 치환을 하기 위한 테이블로 사용되어, sbox[0] = 0x63, sbox[1] = 0x7c, … 등으로 1바이트 입력을 넣었을 때 무작위 (에 가까운) 값 새로운 1 바이트로 치환하는 역할을 한다. 만약 S-BOX가 올바르게 생성되지 않는다면 S-BOX 식을 선형에 가깝게 근사하여 공격하는 linear cryptanalysis나 기타 공격에 취약해지기 때문에 이를 올바르게 선택하는 것은 아주 중요하다.
 
-![poly1](/images/pbctf2020-bitstreams/poly1.png)
-
-When branch was not taken.
-
-![poly2](/images/pbctf2020-bitstreams/poly2.png)
-
-It was implemented to execute `add` instruction if branch was taken and execute `shl` instruction if not.
-
-In my opinion, this is why fs segment selector setted to 0x33 :p
-
-Okay, so this is what `mod` function and does.
-
-1. collect 4 bit from bitstream.
-2. set collected 4 bit value (0~15) as loop count
-3. in while loop:  
-3-1. read 1 bit  
-3-2. if bit is 0, do shl 1 for the given specific address.  
-3-3. if bit is 1, do add 1 for the given specific address.  
-4. increase 1 given specific address.
-5. if bitstream ends, return.
-
-Going back to the point of debugging, the `mod` function finally does rewriting code section.
-
-# Analyzing new code
-![newcode1](/images/pbctf2020-bitstreams/newcode1.png)
-
-Newly written code is more clear. When I tried to do decompile, `positive sp value has been found` error was occured. But fixing SP value at `0x401102` to `-0x8` can fix it.
-
-![newdeccode1](/images/pbctf2020-bitstreams/newdeccode1.png)
-
-The functions which called in this is not static function. When I enter into the function, it was similar to plt. So the first time I call this function, dl resolving is performed.
-
-![plt](/images/pbctf2020-bitstreams/plt.png)
-
-Anyway, this function does check some condition about input.
-
-1. input length must be 86.
-2. input must be in the flag format (pbctf{}).
-3. input starts with `mod` and ends with `0401`.
-
-If this condition all satisfied, the binary does rewriting code section again.
-
-![func2](/images/pbctf2020-bitstreams/func2.png)
-
-The next function checks again about input.
-
-1. find the last underbar (`_`) at the end.
-2. decode the string to hex after `_`. (e.g. `4142` -> `AB`)
-3. call `bitstream` function with arguments as decoded value and `mod` function.
-4. compare `bitstream` function result with `:3 awesome`.
-5. if same, rewriting again.
-
-Okay, our input after `_` is in the form of a hex and the result of `mod` function should be `:3 awesome`.
-
-We already analyzed the `mod` function, so let's write the code.
+이제 문제에서 주어진 S-BOX를 분석해보자.
 
 ```python
-target = bytearray(":3 awesome")
-bitstream = ''
-
-for c in target:
-    cur = bin(c)[2:]
-    cur_stream = ''
-    for i in range(len(cur)):
-        bit = cur[i]
-        if bit == '0':
-            cur_stream += '0'
-        else:
-            cur_stream += '01'
-    bitstream = '0' + (bin(len(cur_stream) - 1)[2:].zfill(4) + cur_stream)[::-1] + bitstream
-
-bitstream = '0' * (8 - len(bitstream) % 8) + bitstream
-res = []
-while bitstream:
-    bit = bitstream[-8:]
-    res.append(int(bit, 2))
-    bitstream = bitstream[:-8]
-
-print ''.join([hex(i)[2:].zfill(2) for i in res]) + '0401'
+sbox = (76, 81, 118, 107, 56, 37, 2, 31, 164, 185, 158, 131, 208, 205, 234, 247, 135, 154, 189, 160, 243, 238, 201, 212, 111, 114, 85, 72, 27, 6, 33, 60, 193, 220, 251, 230, 181, 168, 143, 146, 41, 52, 19, 14, 93, 64, 103, 122, 10, 23, 48, 45, 126, 99, 68, 89, 226, 255, 216, 197, 150, 139, 172, 177, 77, 80, 119, 106, 57, 36, 3, 30, 165, 184, 159, 130, 209, 204, 235, 246, 134, 155, 188, 161, 242, 239, 200, 213, 110, 115, 84, 73, 26, 7, 32, 61, 192, 221, 250, 231, 180, 169, 142, 147, 40, 53, 18, 15, 92, 65, 102, 123, 11, 22, 49, 44, 127, 98, 69, 88, 227, 254, 217, 196, 151, 138, 173, 176, 78, 83, 116, 105, 58, 39, 0, 29, 166, 187, 156, 129, 210, 207, 232, 245, 133, 152, 191, 162, 241, 236, 203, 214, 109, 112, 87, 74, 25, 4, 35, 62, 195, 222, 249, 228, 183, 170, 141, 144, 43, 54, 17, 12, 95, 66, 101, 120, 8, 21, 50, 47, 124, 97, 70, 91, 224, 253, 218, 199, 148, 137, 174, 179, 79, 82, 117, 104, 59, 38, 1, 28, 167, 186, 157, 128, 211, 206, 233, 244, 132, 153, 190, 163, 240, 237, 202, 215, 108, 113, 86, 75, 24, 5, 34, 63, 194, 223, 248, 229, 182, 171, 140, 145, 42, 55, 16, 13, 94, 67, 100, 121, 9, 20, 51, 46, 125, 96, 71, 90, 225, 252, 219, 198, 149, 136, 175, 178)
 ```
 
-Now I got value `a992549409a48246a52a456a15354a552ba552240401`. From here, there are many ways to construct the hex value, so multiple flags can appear.
+합리적인 의심으로.. sbox를 취약하게 변형한다면, 제일 유력한 방법은 sbox 자체를 선형적으로 만드는 케이스가 존재한다. 선형 함수의 특징은 다음 두 특징이 있는데,
 
-The author's hex value was `8d4a1a45050245414ba56a8a3454d452aa86526a8a0401`. 
+$$
+f(x + y) = f(x) + f(y)\\
+af(x) = f(ax)
+$$
 
-Below is third rewrited function.
-
-![func3](/images/pbctf2020-bitstreams/func3.png)
-
-It exchanges first 8 bytes of input to `0x320471336C4B6F01`.
-
-And calling bitstream again, but callback is not function `mod`. This callback just xors the value before underbar of input with my original first 8 bytes.
-
-And not in the decompiled code, but if you look at the code in disassembled code, it checks if the first 8 bytes are `0x6D73415F333C5F49`.
-
-It means our first 8 bytes must be `0x6D73415F333C5F49 ^ 0x320471336C4B6F01 == 0x5F77306F5F773048 ("H0w_l0w_")`.
-
-I think it was fake that first function checked if it started with `pbctf{mod`.
-
-Okay, only the last one is left.
-
-![func4](/images/pbctf2020-bitstreams/func4.png)
-
-Last rewrited code simply adds the next index value in order of input and call `sub_401110` with argument as getData function output.
-
-![func5](/images/pbctf2020-bitstreams/func5.png)
-
-As you can see, `sub_401110` seems matrix multiplication.
-
-Matrix is `getData` function's output and vector is our input which added as index order.
-
-After that, binary calls main function. So the value compared from main is output of matrix multiplication.
-
-# Decrypt the flag
-We have original matrix so we can recovery original vector.
-
-Ask to sage what the original was.
+이 중 첫 번째 특성을 이용하여 이를 확인하였다.
 
 ```python
-mat = [0x66a49, 0xa8f1d, 0xcc652, 0x67309, 0xf7c14, 0x9e0f1, 0x930d4, 0x8a1dd, 0x4ad6d, 0xb643, 0xfcdfe, 0x33c88, 0xb592a, 0xd9c5e, 0x7b6e5, 0x7f2b9, 0xeb8f, 0x6f9e1, 0x68869, 0x3c99c, 0x30668, 0xaa073, 0x92ff5, 0x15d16, 0x30b09, 0xcbbf8, 0x204fd, 0xad2ef, 0x55d1a, 0x25a04, 0xaffee, 0x95dc1, 0x34e11, 0x7ca3c, 0x3a5a, 0x5a3fa, 0xef962, 0xd388e, 0x9da51, 0x74d42, 0x8cc88, 0x3657e, 0xf359c, 0xe4610, 0x18c63, 0xb9284, 0x7af0e, 0xc23f4, 0xe0282, 0xc2d56, 0xfdee0, 0xbc077, 0xd1990, 0xbc14e, 0x363ce, 0xe9efc, 0x1ee44, 0x9386f, 0x3b11, 0xc4cc1, 0xe6809, 0x639f1, 0x2176, 0x88cef, 0x31159, 0x413d5, 0x9dfea, 0x7ad3f, 0x4e28f, 0xac7da, 0xa5705, 0x7a2f, 0x7c4de, 0xb8986, 0x1694d, 0x15e56, 0x1f9e6, 0x3add5, 0x92862, 0xc518c, 0x555c1, 0x80527, 0x4336f, 0xa13db, 0x92d03, 0x43941, 0xd6e7, 0xf8ad6, 0x636c, 0x930b8, 0xbd697, 0x977a5, 0x73e12, 0x81652, 0xc8faa, 0xc3378, 0x19a924, 0x2a3c74, 0x331948, 0x19cc24, 0x3df050, 0x2783c4, 0x24c350, 0x228774, 0x12b5b4, 0x2d90c, 0x3f37f8, 0xcf220, 0x2d64a8, 0x367178, 0x1edb94, 0x1fcae4, 0x3ae3c, 0x1be784, 0x1a21a4, 0xf2670, 0xc19a0, 0x2a81cc, 0x24bfd4, 0x57458, 0x1c29, 0x149b0, 0x5c4e3, 0xffa06, 0x46e32, 0x32deb, 0xdfbdf, 0xabc38, 0x25825, 0x89ef6, 0x1faa1, 0xca68d, 0xfeed6, 0x77cec, 0x9ddb1, 0x19551, 0x71646, 0x51852, 0xe94f, 0xfc5e, 0x3b70d, 0xaf20, 0x23f53, 0xffdff, 0x61526, 0x76dcb, 0x1b0fc, 0x46107, 0xbb6a2, 0xad701, 0x2c8ad, 0xa3ce0, 0xa1c7c, 0xfb7e8, 0x3aa90, 0xc139f, 0xe36b8, 0x73980, 0xf1235, 0x6ed0d, 0xec3dc, 0x58636, 0x3f02f, 0xbfbe0, 0xa6248, 0xbf080, 0xb4343, 0x19b21, 0xbe40e, 0xa2f9d, 0x5df61, 0x7b7cc, 0xb790d, 0x20910, 0x5c011, 0x685ee, 0xc9582, 0x9eff8, 0x280d4, 0x7c16e, 0xc46f1, 0xca5ba, 0x39c89, 0xe0c7, 0x5ee64, 0xee672, 0xed0dc, 0xab645, 0xfd85a, 0x40629, 0x59c9e, 0xe68b1, 0x2262f, 0xece1d, 0xfc7a3, 0x48f27, 0x2b82d, 0x9d87f, 0x67f24, 0x55708, 0x959f9, 0xe57b5, 0x2b1eb, 0x831b6, 0x55308, 0x85a22, 0xebb67, 0x2bf67, 0x34c58, 0x5f7dd, 0xdc402, 0x38291, 0x59cd5, 0xf0f26, 0x46792, 0x9aa95, 0xede5d, 0x793a, 0x6d2ed, 0x72313, 0xc96e0, 0xcfae6, 0x3b5e, 0xbfe26, 0x3c5d5, 0xfef2a, 0x7af1c, 0x90175, 0x7f3df, 0x23010, 0x82b64, 0xcaebb, 0x7339, 0xe70c4, 0x51822, 0x42da5, 0x6d022, 0x811a, 0x545c0, 0x6ec9f, 0x10983, 0x3e6d5, 0xbd79b, 0xc9ea6, 0x6faf0, 0x5fd21, 0x10c94, 0xc0bd5, 0x38367, 0xacc6a, 0x2c8fd, 0xdd2aa, 0x38831, 0x74249, 0x758d0, 0x77e2c, 0x247b7, 0xd0619, 0x173ee, 0xf9c9b, 0x764f0, 0xa5b4f, 0xbd432, 0xbd7b8, 0x69369, 0xa9b76, 0x4f1aa, 0xf5b47, 0x2baaa, 0x83475, 0x62915, 0xc9f2a, 0x41ff0, 0xa09a0, 0x542ad, 0xa0366, 0x937f3, 0xce61e, 0xaa132, 0x65c19, 0x8db75, 0x5ca68, 0x41479, 0xadd9a, 0x5fb79, 0xc3bbc, 0xe0026, 0xace2b, 0xdf5d7, 0xef1a, 0x32256, 0xedd3b, 0xb4dcf, 0xee19, 0x18dde, 0xbdd55, 0xd749f, 0xd801c, 0x11a47, 0x51e35, 0x80ce7, 0x13a2d, 0x6a62e, 0xec85e, 0xebf1e, 0xe81ca, 0xe370c, 0x3a967, 0x2d127, 0xb975e, 0xa5be4, 0x178b4, 0xfff2935b, 0xfff53b65, 0xfff5d37c, 0xfff51a95, 0xfffa3a7e, 0xfff883ba, 0xfff4966e, 0xfff11a9a, 0xfff5ff93, 0xfff316d3, 0xfff3499d, 0xfff7c79e, 0xfff81ee6, 0xfff20000, 0xfff6925c, 0xfff662d1, 0xfff74ef9, 0xfff8b25b, 0xffffa4da, 0xfff807d8, 0xfff43b06, 0xfff1aceb, 0xfff28b4d, 0xfff8126e, 0x86646, 0xc4ca3, 0x1c476, 0x3fa3d, 0x728cf, 0x23b71, 0x9dc9, 0xcad0e, 0x685a0, 0x18c37, 0x128ce, 0x87a4, 0x5330c, 0x4f2fc, 0x31b9, 0x42d8a, 0x3b93e, 0x7e69c, 0xb0c64, 0x9aa15, 0x5fc29, 0xaa442, 0x6675d, 0xbb84e, 0xfffcec14, 0xffc9767c, 0xffdfc2bc, 0xffc75818, 0xffee1f48, 0xffe9742c, 0xffd11ab0, 0xffe26020, 0xffd7dc2c, 0xffef29b8, 0xffc25a04, 0xfffbc56c, 0xfff68f30, 0xfffcc258, 0xfff7b3d8, 0xfff408fc, 0xfffa3d64, 0xffd3320c, 0xffca8c5c, 0xfff9c51c, 0xffe88fec, 0xffe97ba8, 0xffe6fed0, 0xffdaf700, 0x7733a, 0xc95f7, 0xca691, 0x3cf59, 0x31d9b, 0x95a9a, 0x990dd, 0x408ae, 0x4b2e3, 0x4adc1, 0xa5738, 0xafb09, 0xbe494, 0x5cb0a, 0xabdd5, 0xc6c6, 0xe4497, 0x3eb57, 0x80e0b, 0x4114d, 0xaecde, 0x28386, 0x22e8a, 0x5ba89, 0x992e9, 0xe5f30, 0x94e93, 0xe095f, 0xaadee, 0xca282, 0xc3254, 0x121ab, 0x333b, 0x4bc5b, 0xe1976, 0x41180, 0x155cb, 0x21b44, 0xe30f5, 0xdf0c2, 0x78f9d, 0xe9b1b, 0x54ddf, 0x2e8f1, 0x8d72c, 0x12171, 0xf2e8a, 0xbf14f, 0x2e9bd, 0xac10a, 0xa676, 0x5f4bb, 0xf8d22, 0x2abd9, 0xf88e7, 0xab788, 0x19aa5, 0x32dee, 0x72253, 0x2b4fe, 0x581b1, 0xdd4e5, 0x4b8a6, 0xc93bc, 0xacb97, 0x9316c, 0x81f8d, 0x73dc8, 0xe3b11, 0xec52d, 0xb7675, 0x7c310, 0x688ac, 0xe438f, 0xef1b2, 0xa82ae, 0xb17e7, 0xc0899, 0x64d7d, 0x89b55, 0x59717, 0xa4ee5, 0xce8ee, 0xe97fd, 0xf1a7d, 0x187d5, 0xf2ac2, 0x76ff0, 0xc42e2, 0x89f7e, 0xc48cf, 0xd45c9, 0xab0ce, 0x2b851, 0xda03a, 0x7d024, 0x12a87, 0xd721, 0x4ba39, 0x59d5f, 0x1e46b, 0xc46a4, 0xd8d7e, 0x934ac, 0x4fc, 0xca0a, 0xf5171, 0x2201c, 0x4a1aa, 0x71d7b, 0x53070, 0x1eb15, 0x33368, 0x6c54b, 0x11c21, 0x36fc8, 0xafdec, 0x6ce66, 0xc88df, 0x12d36, 0xfff8a4ae, 0xfff98bde, 0xffe12b3e, 0xfff379cc, 0xfffb0812, 0xffedeace, 0xfffefbd0, 0xffeaabe4, 0xfff62744, 0xfff784e2, 0xfff6fb84, 0xffe624d6, 0xfff99522, 0xffe77db4, 0xfffc1fdc, 0xfffc2f12, 0xffe77d18, 0xfff00590, 0xffe79210, 0xffed16ec, 0xffe01454, 0xfff8eea6, 0xffee24e6, 0xfffbb744, 0xfff9e9ee, 0xffe68810, 0xfffbf606, 0xffea5a22, 0xfff545cc, 0xfffb4bf8, 0xffea0024, 0xffed447e, 0xfff963de, 0xfff06b88, 0xffff8b4c, 0xfff4b80c, 0xffe20d3c, 0xffe58ee4, 0xffec4b5e, 0xfff1657c, 0xffee66f0, 0xfff93504, 0xffe194c8, 0xffe373e0, 0xfffce73a, 0xffe8daf8, 0xfff0a1e4, 0xffe7b818, 0x3ada9, 0x33a11, 0xf6a61, 0x6431a, 0x27bf7, 0x90a99, 0x8218, 0xaaa0e, 0x4ec5e, 0x43d8f, 0x4823e, 0xced95, 0x3356f, 0xc4126, 0x1f012, 0x1e877, 0xc4174, 0x7fd38, 0xc36f8, 0x9748a, 0xff5d6, 0x388ad, 0x8ed8d, 0x2245e, 0x7c4de, 0xb8986, 0x1694d, 0x15e56, 0x1f9e6, 0x3add5, 0x92862, 0xc518c, 0x555c1, 0x80527, 0x4336f, 0xa13db, 0x92d03, 0x43941, 0xd6e7, 0xf8ad6, 0x636c, 0x930b8, 0xbd697, 0x977a5, 0x73e12, 0x81652, 0xc8faa, 0xc3378, 0xc5191, 0xf3db5, 0xab2e4, 0xafccf, 0x5854e, 0xa380c, 0xf355f, 0x799a3, 0xe63d5, 0x56eb6, 0x1c6e1, 0xdc0b5, 0x30591, 0x60808, 0xc5a1a, 0xa7997, 0xb2496, 0xe3930, 0x5ec62, 0x2089d, 0x704ad, 0xed91, 0x66c89, 0xe19a8, 0xffff7333, 0xfff98f90, 0xffe32791, 0xffb01de2, 0xffe9d906, 0xfff01a69, 0xffba14a5, 0xffca52e8, 0xfff44747, 0xffd4e532, 0xfff61adb, 0xffc0bf3f, 0xffb055d2, 0xffda8f64, 0xffceab8b, 0xfff8156b, 0xffdc90a2, 0xffe68666, 0xfffb7175, 0xfffb122a, 0xffed6cbf, 0xfffc9460, 0xfff4c361, 0xffb00a05, 0xfffdecfa, 0xfff83256, 0xffe850ca, 0xffe6c2b4, 0xfff20a20, 0xfff405be, 0xfffde6d8, 0xffe7e856, 0xfff8f932, 0xffea672c, 0xfffa6e06, 0xffe45aac, 0xfff8ef9e, 0xfff17b6e, 0xfff14e60, 0xfff103a8, 0xfffb7092, 0xffe5f3ce, 0xfffd1824, 0xffe0c6ca, 0xfff13620, 0xffeb4962, 0xffe8579c, 0xffe85090, 0xc3024, 0xe8b47, 0x486f4, 0x49e68, 0x7902d, 0xa6466, 0xdce65, 0xba4b6, 0xdbb2b, 0x7fb2c, 0xfd965, 0x8f2fc, 0x3e99a, 0x63eb3, 0xb9647, 0x3eb67, 0x59c6b, 0x6e25d, 0x3697b, 0xd4f7d, 0xc0642, 0x943a, 0x932fc, 0x6d1df, 0xd6ca5, 0xac49b, 0xa2c84, 0xae56b, 0x5c582, 0x77c46, 0xb6992, 0xee566, 0xa006d, 0xce92d, 0xcb663, 0x83862, 0x7e11a, 0xe0000, 0x96da4, 0x99d2f, 0x8b107, 0x74da5, 0x5b26, 0x7f828, 0xbc4fa, 0xe5315, 0xd74b3, 0x7ed92, 0xc4fb, 0xda261, 0x80f51, 0xe29fa, 0x4782e, 0x5a2f5, 0xbb954, 0x767f8, 0xa08f5, 0x43592, 0xf697f, 0x10ea5, 0x25c34, 0xcf6a, 0x2130a, 0x2fdc1, 0x170a7, 0xb337d, 0xd5ce9, 0x18eb9, 0x5dc05, 0x5a116, 0x6404c, 0x94240, 0xc4705, 0xb7a29, 0x2c64f, 0x7cc62, 0x9e252, 0x61489, 0x993ba, 0xc8f9b, 0xc2f46, 0x12691, 0xb2dc4, 0xfed78, 0xafabd, 0xd484c, 0x1e48d, 0x58963, 0x9e92d, 0x785b3, 0x4f06c, 0xcd93f, 0x71149, 0xb44b4, 0x933fa, 0x50ae2] # getData output
-v = [0x1b95f6bf, 0x18f211ff, 0x79151f2, 0xbc6c18e, 0x6e57dafc, 0xab169a9, 0x602ed53, 0x157f6311, 0x1941e3b1, 0xc3082ee, 0x1775a1cc, 0x159139bf, 0xca073d5, 0xe7815098, 0xd65bbaa, 0x999da948, 0x43b26ac, 0x2086eb8d, 0x1a03c9a2, 0x1026dbd5, 0x10cce155, 0xfcfa3266, 0xce1bdc02, 0x182e6cd, 0xbc6c18e, 0xb1ba5b6, 0xca88efb3, 0xd114bc68, 0x11edf430, 0x187eaf68, 0x199895ae, 0xa389b7c]    # encrypted flag
-A = []
-for i in range(32):
-    A.append(mat[i*24:i*24+24])
-A = Matrix(Zmod(2^32), A)
-ans = A.solve_right(vector(v))
-print [i.lift() & 0xff for i in ans]
+for i in range(256):
+    for j in range(256):
+        assert sbox[i] ^ sbox[j] ^ sbox[0] == sbox[i ^ j]
 ```
 
-All you have to do is reverse calculation of ans.
+![sbox의 선형성 확인](/images/codegate2022-final-aesmaster/Untitled%202.png)
+
+단 하나의 assert도 걸리지 않은 것을 확인할 수 있다. 이 때 AES 에서 덧셈과 뺄셈은 bitwise xor로 이루어지기 때문에 이에 유의해야 한다. 
+
+자 기존에 AES에서 치환의 목적은 비선형성을 추가하기 위함이라고 했는데, 수정된 S-BOX에 의해 AES의 전체 과정이 선형적이게 되었다. 위 수식과 같은 원리로 AES의 선형성에 대해서도 검사해볼 수 있다.
 
 ```python
-ans = [39, 4, 59, 58, 111, 131, 127, 145, 149, 125, 125, 136, 136, 116, 113, 149, 133, 119, 65, 89, 138, 111, 120, 96]
-for i in range(len(ans) - 2, -1, -1):
-    ans[i] -= ans[i + 1] & 0xff
+s_box = (76, 81, 118, 107, 56, 37, 2, 31, 164, 185, 158, 131, 208, 205, 234, 247, 135, 154, 189, 160, 243, 238, 201, 212, 111, 114, 85, 72, 27, 6, 33, 60, 193, 220, 251, 230, 181, 168, 143, 146, 41, 52, 19, 14, 93, 64, 103, 122, 10, 23, 48, 45, 126, 99, 68, 89, 226, 255, 216, 197, 150, 139, 172, 177, 77, 80, 119, 106, 57, 36, 3, 30, 165, 184, 159, 130, 209, 204, 235, 246, 134, 155, 188, 161, 242, 239, 200, 213, 110, 115, 84, 73, 26, 7, 32, 61, 192, 221, 250, 231, 180, 169, 142, 147, 40, 53, 18, 15, 92, 65, 102, 123, 11, 22, 49, 44, 127, 98, 69, 88, 227, 254, 217, 196, 151, 138, 173, 176, 78, 83, 116, 105, 58, 39, 0, 29, 166, 187, 156, 129, 210, 207, 232, 245, 133, 152, 191, 162, 241, 236, 203, 214, 109, 112, 87, 74, 25, 4, 35, 62, 195, 222, 249, 228, 183, 170, 141, 144, 43, 54, 17, 12, 95, 66, 101, 120, 8, 21, 50, 47, 124, 97, 70, 91, 224, 253, 218, 199, 148, 137, 174, 179, 79, 82, 117, 104, 59, 38, 1, 28, 167, 186, 157, 128, 211, 206, 233, 244, 132, 153, 190, 163, 240, 237, 202, 215, 108, 113, 86, 75, 24, 5, 34, 63, 194, 223, 248, 229, 182, 171, 140, 145, 42, 55, 16, 13, 94, 67, 100, 121, 9, 20, 51, 46, 125, 96, 71, 90, 225, 252, 219, 198, 149, 136, 175, 178)
 
-k = bytearray("H0w_l0w_")
-for i in range(len(ans)):
-    ans[i] ^= k[i % len(k)]
-    
-print ''.join(chr(i) for i in list(k) + ans)
+def sub_bytes(s):
+    for i in range(4):
+        for j in range(4):
+            s[i][j] = s_box[s[i][j]]
+
+def shift_rows(s):
+    s[0][1], s[1][1], s[2][1], s[3][1] = s[1][1], s[2][1], s[3][1], s[0][1]
+    s[0][2], s[1][2], s[2][2], s[3][2] = s[2][2], s[3][2], s[0][2], s[1][2]
+    s[0][3], s[1][3], s[2][3], s[3][3] = s[3][3], s[0][3], s[1][3], s[2][3]
+
+def add_round_key(s, k):
+    for i in range(4):
+        for j in range(4):
+            s[i][j] ^= k[i][j]
+
+# learned from https://web.archive.org/web/20100626212235/http://cs.ucsb.edu/~koc/cs178/projects/JT/aes.c
+xtime = lambda a: (((a << 1) ^ 0x1B) & 0xFF) if (a & 0x80) else (a << 1)
+
+def mix_single_column(a):
+    # see Sec 4.1.2 in The Design of Rijndael
+    t = a[0] ^ a[1] ^ a[2] ^ a[3]
+    u = a[0]
+    a[0] ^= t ^ xtime(a[0] ^ a[1])
+    a[1] ^= t ^ xtime(a[1] ^ a[2])
+    a[2] ^= t ^ xtime(a[2] ^ a[3])
+    a[3] ^= t ^ xtime(a[3] ^ u)
+
+def mix_columns(s):
+    for i in range(4):
+        mix_single_column(s[i])
+
+r_con = (
+    0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40,
+    0x80, 0x1B, 0x36, 0x6C, 0xD8, 0xAB, 0x4D, 0x9A,
+    0x2F, 0x5E, 0xBC, 0x63, 0xC6, 0x97, 0x35, 0x6A,
+    0xD4, 0xB3, 0x7D, 0xFA, 0xEF, 0xC5, 0x91, 0x39,
+)
+
+def bytes2matrix(text):
+    """ Converts a 16-byte array into a 4x4 matrix.  """
+    return [list(text[i:i+4]) for i in range(0, len(text), 4)]
+
+def matrix2bytes(matrix):
+    """ Converts a 4x4 matrix into a 16-byte array.  """
+    return bytes(sum(matrix, []))
+
+def xor_bytes(a, b):
+    """ Returns a new byte array with the elements xor'ed. """
+    return bytes(i^j for i, j in zip(a, b))
+
+class AES:
+    """
+    Class for AES-128 encryption with CBC mode and PKCS#7.
+    This is a raw implementation of AES, without key stretching or IV
+    management. Unless you need that, please use `encrypt` and `decrypt`.
+    """
+    rounds_by_key_size = {16: 10, 24: 12, 32: 14}
+    def __init__(self, master_key):
+        """
+        Initializes the object with a given key.
+        """
+        assert len(master_key) in AES.rounds_by_key_size
+        self.n_rounds = AES.rounds_by_key_size[len(master_key)]
+        self._key_matrices = self._expand_key(master_key)
+
+    def _expand_key(self, master_key):
+        """
+        Expands and returns a list of key matrices for the given master_key.
+        """
+        # Initialize round keys with raw key material.
+        key_columns = bytes2matrix(master_key)
+        iteration_size = len(master_key) // 4
+
+        i = 1
+        while len(key_columns) < (self.n_rounds + 1) * 4:
+            # Copy previous word.
+            word = list(key_columns[-1])
+
+            # Perform schedule_core once every "row".
+            if len(key_columns) % iteration_size == 0:
+                # Circular shift.
+                word.append(word.pop(0))
+                # Map to S-BOX.
+                word = [s_box[b] for b in word]
+                # XOR with first byte of R-CON, since the others bytes of R-CON are 0.
+                word[0] ^= r_con[i]
+                i += 1
+            elif len(master_key) == 32 and len(key_columns) % iteration_size == 4:
+                # Run word through S-box in the fourth iteration when using a
+                # 256-bit key.
+                word = [s_box[b] for b in word]
+
+            # XOR with equivalent word from previous iteration.
+            word = xor_bytes(word, key_columns[-iteration_size])
+            key_columns.append(word)
+
+        # Group key words in 4x4 byte matrices.
+        return [key_columns[4*i : 4*(i+1)] for i in range(len(key_columns) // 4)]
+
+    def encrypt_block(self, plaintext):
+        """
+        Encrypts a single block of 16 byte long plaintext.
+        """
+        assert len(plaintext) == 16
+
+        plain_state = bytes2matrix(plaintext)
+
+        add_round_key(plain_state, self._key_matrices[0])
+
+        for i in range(1, self.n_rounds):
+            sub_bytes(plain_state)
+            shift_rows(plain_state)
+            mix_columns(plain_state)
+            add_round_key(plain_state, self._key_matrices[i])
+
+        sub_bytes(plain_state)
+        shift_rows(plain_state)
+        add_round_key(plain_state, self._key_matrices[-1])
+
+        return matrix2bytes(plain_state)
+
+    def decrypt_block(self, ciphertext):
+        """
+        Decrypts a single block of 16 byte long ciphertext.
+        """
+        assert len(ciphertext) == 16
+
+        cipher_state = bytes2matrix(ciphertext)
+
+        add_round_key(cipher_state, self._key_matrices[-1])
+        inv_shift_rows(cipher_state)
+        inv_sub_bytes(cipher_state)
+
+        for i in range(self.n_rounds - 1, 0, -1):
+            add_round_key(cipher_state, self._key_matrices[i])
+            inv_mix_columns(cipher_state)
+            inv_shift_rows(cipher_state)
+            inv_sub_bytes(cipher_state)
+
+        add_round_key(cipher_state, self._key_matrices[0])
+
+        return matrix2bytes(cipher_state)
+
+from pwn import *
+
+k = b"\x00" * 16
+
+aes = AES(k)
+ct0 = aes.encrypt_block(b'\x00' * 16)
+ct1 = aes.encrypt_block(b'\x01' * 16)
+ct2 = aes.encrypt_block(b'\x02' * 16)
+ct3 = aes.encrypt_block(b'\x03' * 16)
+print(xor(ct0, ct1, ct2) == ct3)
+print(1 ^ 2 == 3)
 ```
 
-Finally got flag, the input before underbar was `H0w_l0w_l3vel_c4n_y0u_r3ally_go?`.
+![변조된 AES의 선형성 확인](/images/codegate2022-final-aesmaster/Untitled%203.png)
 
-flag: `pbctf{H0w_l0w_l3vel_c4n_y0u_r3ally_go?_8d4a1a45050245414ba56a8a3454d452aa86526a8a0401}`
+True가 나오는 것을 확인할 수 있다.
 
+즉, 이 문제는 선형적인 AES가 주어졌을 때 $\text{LinearAES}(k, p) = p$를 만족하는 $k$를 구하는 문제로 바뀐다.
+
+# Breaking LinearAES
+
+선형 함수가 주어졌을 때 fixed point를 구해야하는 문제는 과거 다양한 ctf에 출제된 적 있다. 이런 류의 문제에 관심있다면 0ctf 2020 - fixedpoint, [포카전 2020 - fixed point revenge](https://rbtree.blog/posts/2020-09-20-poka-science-war-hacking/) 를 추천한다. 관련 내용은 rbtree 님의 블로그에 잘 정리되어있다 ㅎㅎ
+
+위 두 개의 문제는 CRC 함수에 대한 문제였지만, 이번엔 AES가 되었다. AES라고 크게 다른 점은 없는데, 이미 AES가 선형 함수가 된 이상, 해당 문제를 $GF(2^8)$ 위의 행렬로 표현하는게 가능해진다.
+
+전체적인 아이디어는 AES의 전체 과정을 $GF(2^8)$ 위의 연산으로 변경하고, 키 $k$를 변수로 둔 채 `codegate2022{xx}` 값을 암호화한다. 이러면 해당 평문에 대한 암호문을 획득할 수 있고, 해당 암호문은 키가 변수였기 때문에 상수 값이 아닌 방정식의 꼴로 표현된다.
+
+이 상태에서 16개의 미지수와 16개의 방정식 (암호문 16바이트)이 존재하니 연립방정식을 해결하여 키를 획득할 수 있다.
+
+```python
+F.<x> = GF(2^8, "x", modulus=x^8+x^4+x^3+x+1)
+
+def int2el(n):
+    return F.fetch_int(n)
+
+def el2int(n):
+    return n.integer_representation()
+
+def gadd(a, b):
+    return [x + y for x, y in zip(a, b)]
+
+def gmul(a, b):
+    return F.fetch_int(a) * b
+
+def substitute(x):
+    a = F.fetch_int(29)
+    b = F.fetch_int(76)
+    return a * x + b
+
+class LinearAES:
+    rcon = (0x8d, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36)
+    rcon = [int2el(r) for r in rcon]
+
+    def __init__(self, key):
+        self._block_size = 16
+        self._round_keys = self._expand_key([k for k in key])
+        self._state = []
+
+    def _transpose(self, m):
+        return [m[4 * j + i] for i in range(4) for j in range(4)]
+
+    def _expand_key(self, key):
+        round_keys = [key]
+
+        for i in range(10):
+            round_key = []
+            first = round_keys[i][:4]
+            last = round_keys[i][-4:]
+            last = last[1:] + [last[0]]
+            last = [substitute(i) for i in last]
+
+            round_key.extend(gadd(gadd(first, last), [self.rcon[i+1], 0, 0, 0]))
+            for j in range(0, 12, 4):
+                round_key.extend(gadd(round_key[j:j + 4], round_keys[i][j + 4:j + 8]))
+            round_keys.append(round_key)
+
+        for i in range(len(round_keys)):
+            round_keys[i] = self._transpose(round_keys[i])
+
+        return round_keys
+
+    def _add_round_key(self, i):
+        self._state = gadd(self._round_keys[i], self._state)
+
+    def _mix_columns(self):
+        s = [0] * self._block_size
+        for i in range(4):
+            s[i +  0] = gmul(2, self._state[i]) + gmul(3, self._state[i + 4]) + self._state[i + 8] + self._state[i + 12]
+            s[i +  4] = self._state[i] + gmul(2, self._state[i + 4]) + gmul(3, self._state[i + 8]) + self._state[i + 12]
+            s[i +  8] = self._state[i] + self._state[i + 4] + gmul(2, self._state[i + 8]) + gmul(3, self._state[i + 12])
+            s[i + 12] = gmul(3, self._state[i]) + self._state[i + 4] + self._state[i + 8] + gmul(2, self._state[i + 12])
+        self._state = s
+        
+    def _shift_rows(self):
+        self._state = [
+            self._state[0], self._state[1], self._state[2], self._state[3],
+            self._state[5], self._state[6], self._state[7], self._state[4],
+            self._state[10], self._state[11], self._state[8], self._state[9],
+            self._state[15], self._state[12], self._state[13], self._state[14]
+        ]
+        
+    def _sub_bytes(self):
+        self._state = [substitute(i) for i in self._state]
+        
+    def _encrypt_block(self):
+        self._add_round_key(0)
+
+        for i in range(1, 10):
+            self._sub_bytes()
+            self._shift_rows()
+            self._mix_columns()
+            self._add_round_key(i)
+
+        self._sub_bytes()
+        self._shift_rows()
+        self._add_round_key(10)
+
+    def encrypt(self, plaintext):
+        ciphertext = []
+        plaintext = [int2el(c) for c in plaintext]
+        self._state = self._transpose(plaintext)
+        self._encrypt_block()
+        ciphertext.extend(self._transpose(self._state))
+
+        return ciphertext
+
+msg = b"codegate2022{xx}"
+key = PolynomialRing(F, "k", 16).gens()
+aes = LinearAES(key)
+ct = aes.encrypt(msg)
+eqs = [x - int2el(y) for x, y in zip(ct, msg)]
+M, v = Sequence(eqs).coefficient_matrix()
+key = vector(M[:, :-1].solve_right(M[:, -1]))
+print(f"codegate2022{{{bytes([el2int(i) for i in key]).hex()}}}")
+```
+
+![연립방정식을 이용한 키 복구](/images/codegate2022-final-aesmaster/Untitled%204.png)
+
+# Conclusion
+
+블로그를 너무 오래 방치해두기도 했고.. 간만에 재미난 문제를 풀어서 간략하게 라이트업을 써보았습니다. 뒤로갈수록 설명이 조금은 부실해지는 감이 없잖아 있는데, 궁금하거나 이해가 안가는 부분들은 연락주시면 편하게 답변드리겠습니다 ㅎ.ㅎ
+
+원래 영어로 쓸까하다가.. 시간 너무 많이 쏟을거같아서 국문으로만 작성하였으니 외국인 분들은 Google Translator 사용 부탁드립니다 ㅎㅋ
